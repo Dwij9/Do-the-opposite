@@ -1,0 +1,979 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Do the Opposite</title>
+<meta name="description" content="A two-player word game. Never say the word on the card — describe its opposite instead.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&display=swap" rel="stylesheet">
+<script>
+/* Runs before anything else so it can report failures in the code below. */
+(function(){
+  function render(msg){
+    var bar = document.getElementById("crash");
+    if (!bar){
+      if (!document.body) { setTimeout(function(){ render(msg); }, 50); return; }
+      bar = document.createElement("div");
+      bar.id = "crash";
+      bar.className = "crash";
+      document.body.insertBefore(bar, document.body.firstChild);
+    }
+    bar.textContent = "Error: " + msg;
+    bar.hidden = false;
+  }
+  window.addEventListener("error", function(e){
+    render((e.message || "script failed to load") + " — line " + (e.lineno || "?"));
+  });
+  window.addEventListener("unhandledrejection", function(e){
+    render("" + ((e.reason && e.reason.message) || e.reason));
+  });
+})();
+</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/peerjs/1.5.4/peerjs.min.js"></script>
+<style>
+  :root{
+    --paper:#ffffff;
+    --ink:#000000;
+    --trap:#e02b1d;
+    --quiet:#8a8a8a;
+    --rule:#dcdcdc;
+    color-scheme: light;
+  }
+  *{box-sizing:border-box;}
+  html{
+    overflow-x:hidden;
+    -webkit-text-size-adjust:100%;
+  }
+  body{
+    margin:0;
+    min-height:100%;
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"Archivo","Helvetica Neue",Helvetica,Arial,sans-serif;
+    font-weight:600;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  body.inverted{background:var(--ink);color:var(--paper);}
+  body.inverted .rule,body.inverted .tally div{border-color:#333;}
+  body.inverted .btn{border-color:var(--paper);color:var(--paper);}
+  body.inverted .btn.primary{background:var(--paper);color:var(--ink);}
+
+  .screen{
+    display:none;
+    flex-direction:column;
+    max-width:1100px;
+    margin:0 auto;
+    /* svh = the viewport with the browser toolbars showing, so nothing
+       ever sits underneath them. vh first for older phones. */
+    min-height:100vh;
+    min-height:100svh;
+    padding:
+      calc(clamp(16px,4vw,40px) + env(safe-area-inset-top,0px))
+      calc(clamp(16px,4vw,40px) + env(safe-area-inset-right,0px))
+      calc(clamp(16px,4vw,40px) + env(safe-area-inset-bottom,0px))
+      calc(clamp(16px,4vw,40px) + env(safe-area-inset-left,0px));
+  }
+  .screen.on{display:flex;}
+  .spacer{flex:1;}
+
+  /* ---------- type ---------- */
+  .wordmark{
+    font-weight:900;
+    letter-spacing:-.045em;
+    line-height:.85;
+    font-size:clamp(3rem,14vw,8rem);
+    text-transform:uppercase;
+    margin:0;
+  }
+  .wordmark span{display:block;}
+  .tagline{
+    font-weight:400;
+    font-size:clamp(.95rem,2.4vw,1.15rem);
+    line-height:1.5;
+    max-width:44ch;
+    margin:18px 0 0;
+  }
+  h2.sect{
+    font-size:clamp(1.6rem,6vw,2.6rem);
+    font-weight:900;
+    letter-spacing:-.03em;
+    line-height:1;
+    margin:0 0 14px;
+  }
+  p.note{
+    font-weight:400;
+    line-height:1.55;
+    max-width:46ch;
+    margin:0 0 24px;
+  }
+  .tiny{font-size:.82rem;font-weight:400;color:var(--quiet);line-height:1.5;}
+
+  /* ---------- buttons ---------- */
+  .stack{display:grid;gap:10px;}
+  .btn{
+    font:inherit;
+    font-weight:800;
+    text-transform:uppercase;
+    letter-spacing:.01em;
+    font-size:clamp(.95rem,3.2vw,1.1rem);
+    padding:20px 14px;
+    background:transparent;
+    color:var(--ink);
+    border:2px solid var(--ink);
+    cursor:pointer;
+    transition:background .12s,color .12s;
+    width:100%;
+    min-height:56px;
+    touch-action:manipulation;
+    -webkit-tap-highlight-color:transparent;
+    -webkit-user-select:none;
+    user-select:none;
+    appearance:none;
+    border-radius:0;
+  }
+  .btn:active{opacity:.6;}
+  .btn:focus-visible{outline:3px solid var(--trap);outline-offset:3px;}
+  .btn.primary{background:var(--ink);color:var(--paper);}
+  .btn.trap{border-color:var(--trap);color:var(--trap);}
+  .btn.ghost{border-width:1px;font-weight:600;padding:14px;}
+  .btn[disabled]{opacity:.3;cursor:not-allowed;}
+  /* hover only where a pointer exists — on a touchscreen it sticks after a tap */
+  @media (hover:hover){
+    .btn:hover{background:var(--ink);color:var(--paper);}
+    .btn.primary:hover{background:transparent;color:var(--ink);}
+    .btn.trap:hover{background:var(--trap);color:var(--paper);}
+    .btn[disabled]:hover{background:transparent;color:var(--ink);}
+    body.inverted .btn:hover{background:var(--paper);color:var(--ink);}
+    body.inverted .btn.primary:hover{background:transparent;color:var(--paper);}
+  }
+  .btn kbd{font:inherit;font-weight:400;opacity:.55;margin-left:.5em;}
+  @media (max-width:600px){ .btn kbd{display:none;} }
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  @media (prefers-reduced-motion:reduce){.btn{transition:none;}}
+
+  /* ---------- lobby ---------- */
+  .code{
+    font-weight:900;
+    font-size:clamp(3.4rem,22vw,9rem);
+    letter-spacing:.06em;
+    line-height:1;
+    margin:4px 0 0;
+    font-variant-numeric:tabular-nums;
+  }
+  .codefield{
+    font:inherit;
+    font-weight:900;
+    font-size:clamp(2.6rem,16vw,6rem);
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    width:100%;
+    border:none;
+    border-bottom:4px solid var(--ink);
+    padding:4px 0 10px;
+    background:transparent;
+    color:var(--ink);
+    text-align:center;
+  }
+  .codefield:focus{outline:none;border-bottom-color:var(--trap);}
+  .codefield::placeholder{color:var(--rule);}
+  .status-line{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-weight:800;
+    font-size:.9rem;
+    margin:26px 0 0;
+  }
+  .dot{
+    width:11px;height:11px;border-radius:50%;
+    background:var(--quiet);
+    flex:none;
+  }
+  .dot.live{background:var(--ink);}
+  .dot.bad{background:var(--trap);}
+  .dot.pulse{animation:blink 1.1s ease-in-out infinite;}
+  @keyframes blink{50%{opacity:.25;}}
+  @media (prefers-reduced-motion:reduce){.dot.pulse{animation:none;}}
+
+  .crash{
+    position:fixed;
+    top:0;left:0;right:0;
+    z-index:99;
+    background:var(--trap);
+    color:#fff;
+    font-weight:600;
+    font-size:.8rem;
+    line-height:1.45;
+    padding:calc(12px + env(safe-area-inset-top,0px)) 14px 12px;
+  }
+  .crash[hidden]{display:none;}
+
+  .warn{
+    border:2px solid var(--trap);
+    color:var(--trap);
+    padding:14px 16px;
+    font-weight:400;
+    line-height:1.5;
+    font-size:.88rem;
+    margin:0 0 16px;
+  }
+  .warn b{font-weight:800;}
+  .warn[hidden]{display:none;}
+
+  /* ---------- play ---------- */
+  .status{
+    display:flex;
+    align-items:baseline;
+    gap:clamp(14px,4vw,34px);
+    flex-wrap:wrap;
+    font-size:.82rem;
+    font-weight:800;
+  }
+  .status span{color:var(--quiet);font-weight:600;}
+  .meter{display:flex;gap:3px;width:100%;margin-top:12px;height:4px;}
+  .meter i{flex:1;background:var(--rule);}
+  body.inverted .meter i{background:#333;}
+
+  .card{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    justify-content:center;
+    align-items:center;
+    text-align:center;
+    padding:clamp(20px,5vh,56px) 0;
+  }
+  .answer{
+    font-weight:900;
+    text-transform:uppercase;
+    letter-spacing:-.05em;
+    line-height:.88;
+    font-size:clamp(3rem,18vw,10rem);
+    word-break:break-word;
+  }
+  .instruct{
+    font-weight:800;
+    text-transform:uppercase;
+    font-size:clamp(1.05rem,5.2vw,2.4rem);
+    margin-top:.35em;
+  }
+  .outline{
+    font-weight:900;
+    text-transform:uppercase;
+    letter-spacing:-.04em;
+    font-size:clamp(3rem,17vw,9rem);
+    line-height:.9;
+    color:transparent;
+    -webkit-text-stroke:3px var(--ink);
+    text-stroke:3px var(--ink);
+  }
+  .hint{
+    margin-top:clamp(16px,3vh,30px);
+    font-weight:400;
+    font-size:.9rem;
+    color:var(--quiet);
+    max-width:40ch;
+    line-height:1.5;
+  }
+  .whose{
+    font-weight:800;
+    text-transform:uppercase;
+    font-size:clamp(1rem,4vw,1.5rem);
+    margin-bottom:.6em;
+  }
+
+  /* ---------- results ---------- */
+  .final{
+    font-weight:900;
+    letter-spacing:-.05em;
+    line-height:.85;
+    font-size:clamp(4.2rem,22vw,12rem);
+    margin:auto 0 0;
+  }
+  .final small{font-size:.26em;font-weight:800;}
+  .verdict{font-weight:400;font-size:clamp(1rem,2.6vw,1.2rem);max-width:44ch;line-height:1.5;margin:20px 0 0;}
+  .tally{margin:clamp(24px,4vh,40px) 0 0;border-top:2px solid currentColor;}
+  .tally div{display:flex;justify-content:space-between;gap:20px;padding:13px 0;border-bottom:1px solid var(--rule);font-weight:400;}
+  .tally b{font-weight:800;text-transform:uppercase;}
+  .missed{margin:26px 0 0;font-weight:400;line-height:1.7;max-width:62ch;}
+  .missed h3{font-size:.82rem;font-weight:800;letter-spacing:.04em;margin:0 0 6px;}
+  .missed p{margin:0;color:var(--quiet);}
+</style>
+</head>
+<body>
+<div class="crash" id="crash" hidden></div>
+
+<!-- ============ HOME ============ -->
+<section class="screen on" id="s-home">
+  <div class="warn" id="file-warn" hidden></div>
+  <div class="spacer"></div>
+  <h1 class="wordmark"><span>Do the</span><span>Opposite</span></h1>
+  <p class="tagline">Two players, one team, 30 cards drawn from a thousand. You describe the opposite of the word on screen and your partner has to land the real one. Then you swap, card by card.</p>
+  <div class="spacer"></div>
+  <div class="stack">
+    <button class="btn primary" id="go-host" type="button" data-act="host">Start a room</button>
+    <button class="btn" id="go-join" type="button" data-act="join">Join with a code</button>
+    <button class="btn ghost" id="go-solo" type="button" data-act="solo">Share one phone instead</button>
+  </div>
+  <p class="tiny" style="margin-top:18px">Rooms connect the two phones directly to each other. Both need to be online, but there’s nothing to install.</p>
+  <p class="tiny" id="boot" style="margin-top:10px;font-weight:800">v6 · code did not run</p>
+</section>
+
+<!-- ============ HOST LOBBY ============ -->
+<section class="screen" id="s-host">
+  <div class="spacer"></div>
+  <h2 class="sect">Your room code</h2>
+  <p class="note">Read this out to your partner. They tap <b>Join with a code</b> and type it in.</p>
+  <div class="code" id="out-code">····</div>
+  <div class="status-line"><i class="dot pulse" id="host-dot"></i><span id="host-status">Opening the room…</span></div>
+  <div class="spacer"></div>
+  <div class="stack">
+    <button class="btn primary" id="host-begin" type="button" data-act="deal" disabled>Deal the deck</button>
+    <button class="btn" id="host-retry" type="button" data-act="retry" hidden>Try again</button>
+    <button class="btn ghost" type="button" data-act="home">Back</button>
+  </div>
+</section>
+
+<!-- ============ JOIN ============ -->
+<section class="screen" id="s-join">
+  <div class="spacer"></div>
+  <h2 class="sect">Enter the code</h2>
+  <p class="note">Four characters, from the phone that started the room.</p>
+  <input class="codefield" id="in-code" maxlength="4" placeholder="····"
+         autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false"
+         inputmode="text" aria-label="Room code">
+  <div class="status-line"><i class="dot" id="join-dot"></i><span id="join-status">Waiting for a code</span></div>
+  <div class="spacer"></div>
+  <div class="stack">
+    <button class="btn primary" id="join-go" type="button" data-act="joingo">Join the room</button>
+    <button class="btn ghost" type="button" data-act="home">Back</button>
+  </div>
+</section>
+
+<!-- ============ DESCRIBER ============ -->
+<section class="screen" id="s-describe">
+  <header>
+    <div class="status">
+      <div><span>Card</span> <output id="d-pos">1 / 30</output></div>
+      <div><span>Score</span> <output id="d-score">0</output></div>
+      <div><span>Passed</span> <output id="d-pass">0</output></div>
+    </div>
+    <div class="meter" id="d-meter"></div>
+  </header>
+  <div class="card">
+    <div class="whose" id="d-whose">Your turn to describe</div>
+    <div class="answer" id="d-answer">AWAKE</div>
+    <div class="instruct" id="d-instruct">(Describe: Asleep)</div>
+    <p class="hint">Never say either word, or “opposite”, “not”, “un-”. Pass as often as you like.</p>
+  </div>
+  <div class="pair">
+    <button class="btn primary" id="b-got" type="button" data-act="got" style="grid-column:1/-1">Got it<kbd>G</kbd></button>
+    <button class="btn trap" id="b-trap" type="button" data-act="trap">Trapped<kbd>T</kbd></button>
+    <button class="btn" id="b-pass" type="button" data-act="pass">Pass<kbd>P</kbd></button>
+  </div>
+</section>
+
+<!-- ============ GUESSER ============ -->
+<section class="screen" id="s-guess">
+  <header>
+    <div class="status">
+      <div><span>Card</span> <output id="g-pos">1 / 30</output></div>
+      <div><span>Score</span> <output id="g-score">0</output></div>
+      <div><span>Passed</span> <output id="g-pass">0</output></div>
+    </div>
+    <div class="meter" id="g-meter"></div>
+  </header>
+  <div class="card">
+    <div class="whose">Your partner is describing</div>
+    <div class="outline">Guess</div>
+    <p class="hint">Say the word out loud. They’ll mark it on their screen and the next card comes to you.</p>
+  </div>
+  <div class="status-line" style="justify-content:center"><i class="dot live pulse"></i><span id="g-link">Connected</span></div>
+</section>
+
+<!-- ============ HANDOFF (one-phone mode) ============ -->
+<section class="screen" id="s-hand">
+  <div class="card">
+    <div class="whose">Pass the phone</div>
+    <div class="answer" id="h-who">PLAYER 2</div>
+    <p class="hint">Don’t look at the next card until it’s in their hands.</p>
+  </div>
+  <button class="btn primary" id="h-ready" type="button" data-act="ready">I’ve got it</button>
+</section>
+
+<!-- ============ RESULTS ============ -->
+<section class="screen" id="s-end">
+  <div class="final" id="e-final">0<small> / 30</small></div>
+  <p class="verdict" id="e-verdict"></p>
+  <div class="tally">
+    <div><b>Guessed</b><span id="e-got">0</span></div>
+    <div><b>Trapped</b><span id="e-trap">0</span></div>
+    <div><b>Passed</b><span id="e-skip">0</span></div>
+  </div>
+  <div class="missed" id="e-missed"></div>
+  <div class="spacer"></div>
+  <div class="stack" style="margin-top:32px">
+    <button class="btn primary" id="e-again" type="button" data-act="again">Shuffle and play again</button>
+    <button class="btn ghost" type="button" data-act="home">Leave the room</button>
+  </div>
+</section>
+
+<script>
+/* ------------------------------------------------------------------
+   THE WORD POOL — 500 pairs, every entry a single word.
+   [word your partner must say, word you describe]
+   Each round deals ROUND_SIZE of them at random, so no two games match.
+   ------------------------------------------------------------------ */
+const WORDS = [
+  ["Steep","Gentle"],            ["Legendary","Obscure"],       ["Intact","Broken"],
+  ["Reunion","Separation"],      ["Paint","Erase"],             ["Approved","Rejected"],
+  ["Authorised","Prohibited"],   ["Victorious","Beaten"],       ["Tender","Brutal"],
+  ["Hired","Sacked"],            ["High","Low"],                ["Earnings","Spending"],
+  ["Alert","Drowsy"],            ["Lion","Mouse"],              ["Merciful","Merciless"],
+  ["Giraffe","Tortoise"],        ["Encode","Decode"],           ["Ecstatic","Heartbroken"],
+  ["Effortless","Gruelling"],    ["Dragon","Gecko"],            ["Productive","Wasteful"],
+  ["Upload","Download"],         ["Buy","Sell"],                ["Remember","Forget"],
+  ["Hilarious","Depressing"],    ["Relief","Dread"],            ["Crop","Weed"],
+  ["Crowded","Deserted"],        ["Attacker","Goalkeeper"],     ["Travel","Settle"],
+  ["Split","Merge"],             ["Command","Obey"],            ["Young","Elderly"],
+  ["Tracksuit","Ballgown"],      ["Crunchy","Mushy"],           ["Democracy","Dictatorship"],
+  ["Denotation","Connotation"],  ["Jungle","Tundra"],           ["Incumbent","Challenger"],
+  ["Feed","Starve"],             ["Build","Destroy"],           ["Send","Receive"],
+  ["Rebel","Conform"],           ["Accepted","Refused"],        ["Spontaneous","Planned"],
+  ["Sprint","Stroll"],           ["Pedalo","Speedboat"],        ["Compliment","Criticise"],
+  ["Create","Ruin"],             ["Giant","Tiny"],              ["Consistent","Contradictory"],
+  ["Uncover","Bury"],            ["Secure","Vulnerable"],       ["Gain","Deficit"],
+  ["Hamster","Rhino"],           ["Income","Expense"],          ["Lush","Withered"],
+  ["Warm","Cool"],               ["Construct","Demolish"],      ["Ticklish","Stoic"],
+  ["Shaved","Bearded"],          ["Bland","Flavourful"],        ["Now","Later"],
+  ["Birth","Death"],             ["Lock","Unlock"],             ["Middle","Margin"],
+  ["Allowed","Banned"],          ["Industrious","Slothful"],    ["Constant","Intermittent"],
+  ["Throw","Catch"],             ["Cheerful","Gloomy"],         ["Flat","Bumpy"],
+  ["Monotonous","Varied"],       ["Overpriced","Underpriced"],  ["Sterile","Contaminated"],
+  ["Legitimate","Bogus"],        ["Union","Secession"],         ["Patient","Impatient"],
+  ["Enslave","Emancipate"],      ["Steadfast","Fickle"],        ["Hawk","Dove"],
+  ["New","Old"],                 ["Candle","Floodlight"],       ["Pit","Tower"],
+  ["Interior","Exterior"],       ["Immune","Susceptible"],      ["Predictable","Surprising"],
+  ["Promotion","Redundancy"],    ["Contribute","Freeload"],     ["Leak","Seal"],
+  ["Toddler","Grandad"],         ["Trickle","Torrent"],         ["Tadpole","Frog"],
+  ["Fat","Skinny"],              ["Upstream","Downstream"],     ["Profit","Loss"],
+  ["Chew","Gulp"],               ["Compress","Decompress"],     ["Noisy","Quiet"],
+  ["Wholesale","Retail"],        ["Tall","Short"],              ["Authentic","Forged"],
+  ["Shiny","Matte"],             ["Recovered","Injured"],       ["Wet","Dry"],
+  ["Comfort","Distress"],        ["Enthusiastic","Apathetic"],  ["Honour","Disgrace"],
+  ["Routine","Adventure"],       ["Firm","Floppy"],             ["Copy","Original"],
+  ["Sow","Reap"],                ["Stuffed","Hollowed"],        ["Inhale","Exhale"],
+  ["Wealthy","Broke"],           ["Occupy","Evacuate"],         ["Sew","Unpick"],
+  ["Bloom","Wither"],            ["Felony","Misdemeanour"],     ["Begin","Finish"],
+  ["Inflated","Deflated"],       ["Reserved","Talkative"],      ["Freeze","Thaw"],
+  ["Waddle","Glide"],            ["Debut","Farewell"],          ["Village","Metropolis"],
+  ["Loaded","Unloaded"],         ["Peak","Valley"],             ["Wedding","Funeral"],
+  ["Mediocre","Brilliant"],      ["Print","Shred"],             ["Teaspoon","Shovel"],
+  ["Farm","Skyscraper"],         ["Advance","Retreat"],         ["Revenue","Expenditure"],
+  ["Cut","Paste"],               ["Drift","Steer"],             ["Sweeten","Sour"],
+  ["Wound","Heal"],              ["Pattern","Randomness"],      ["Even","Jagged"],
+  ["Silk","Sandpaper"],          ["Signed","Unsigned"],         ["Toxic","Pure"],
+  ["Fan","Hater"],               ["Werewolf","Poodle"],         ["Striker","Defender"],
+  ["Velvet","Gravel"],           ["Most","Least"],              ["Hum","Scream"],
+  ["Spring","Autumn"],           ["Prosecution","Defence"],     ["Impartial","Prejudiced"],
+  ["Shout","Whisper"],           ["Sober","Drunk"],             ["Big","Little"],
+  ["Input","Output"],            ["Enlist","Resign"],           ["Surface","Depths"],
+  ["Anaesthetic","Stimulant"],   ["Solution","Problem"],        ["Beloved","Hated"],
+  ["Boil","Chill"],              ["Ascend","Sink"],             ["Prefix","Suffix"],
+  ["Nationalise","Privatise"],   ["Transparent","Opaque"],      ["First","Last"],
+  ["Launch","Crash"],            ["Hardworking","Idle"],        ["Inland","Coastal"],
+  ["Treasure","Trash"],          ["Wave","Stillness"],          ["Warped","True"],
+  ["Genuine","Counterfeit"],     ["Repair","Smash"],            ["Typical","Exceptional"],
+  ["Intelligent","Stupid"],      ["Devoted","Disloyal"],        ["Shade","Glare"],
+  ["Full","Empty"],              ["Rural","Urban"],             ["Vowel","Consonant"],
+  ["Coach","Player"],            ["Meeting","Parting"],         ["Fast","Slow"],
+  ["Top","Bottom"],              ["Simple","Elaborate"],        ["Immediate","Eventual"],
+  ["Tedious","Thrilling"],       ["Fit","Unfit"],               ["Join","Quit"],
+  ["Sip","Guzzle"],              ["Protector","Predator"],      ["Hurry","Linger"],
+  ["Disclose","Withhold"],       ["Smile","Frown"],             ["Import","Export"],
+  ["Wolf","Lamb"],               ["Thick","Thin"],              ["Exposed","Covered"],
+  ["Rare","Common"],             ["Sky","Ground"],              ["Soldier","Pacifist"],
+  ["Gift","Steal"],              ["Faith","Disbelief"],         ["Block","Allow"],
+  ["Engagement","Breakup"],      ["Arrive","Depart"],           ["Give","Take"],
+  ["Hot","Cold"],                ["Moral","Immoral"],           ["Flame","Frost"],
+  ["Artery","Vein"],             ["Strengthen","Weaken"],       ["Stalactite","Stalagmite"],
+  ["Former","Latter"],           ["Wrap","Unwrap"],             ["Eyewitness","Hearsay"],
+  ["Real","Fake"],               ["Fresh","Stale"],             ["Dash","Dawdle"],
+  ["Guest","Host"],              ["Voluntary","Compulsory"],    ["Teammate","Competitor"],
+  ["Fed","Hungry"],              ["Praise","Insult"],           ["Sprout","Decay"],
+  ["Liberal","Authoritarian"],   ["Landlord","Renter"],         ["Early","Late"],
+  ["Thirsty","Quenched"],        ["Bald","Hairy"],              ["Rehearsal","Performance"],
+  ["Energetic","Lethargic"],     ["Innovation","Convention"],   ["Migrate","Remain"],
+  ["Hard","Soft"],               ["Alive","Dead"],              ["Protest","Applaud"],
+  ["Heavy","Light"],             ["Reward","Penalise"],         ["Source","Destination"],
+  ["Rush","Wait"],               ["Heroic","Villainous"],       ["Skilled","Unskilled"],
+  ["Crescendo","Diminuendo"],    ["Rise","Fall"],               ["Resist","Yield"],
+  ["Tunnel","Bridge"],           ["Dense","Sparse"],            ["Deliver","Collect"],
+  ["Walking","Teleporting"],     ["Alibi","Confession"],        ["Hopeful","Despairing"],
+  ["Luxury","Poverty"],          ["Famous","Unknown"],          ["Courageous","Cowardly"],
+  ["Torch","Lighthouse"],        ["Proud","Ashamed"],           ["Core","Rim"],
+  ["Palace","Tent"],             ["Swamp","Dune"],              ["Accept","Reject"],
+  ["Just","Unjust"],             ["Prosperous","Struggling"],   ["Fair","Biased"],
+  ["Hourly","Annual"],           ["Asset","Liability"],         ["Enter","Exit"],
+  ["Here","There"],              ["Raise","Drop"],              ["Thank","Blame"],
+  ["Nocturnal","Diurnal"],       ["Synchronous","Asynchronous"], ["Laughing","Crying"],
+  ["Left","Right"],              ["Lighthearted","Grave"],      ["Staccato","Legato"],
+  ["Stiff","Limp"],              ["Run","Rest"],                ["Countryside","City"],
+  ["Tuxedo","Pyjamas"],          ["Sun","Moon"],                ["Virtue","Vice"],
+  ["Violence","Nonviolence"],    ["Blizzard","Heatwave"],       ["Front","Back"],
+  ["Credit","Debt"],             ["Peaceful","Furious"],        ["Trade","Embargo"],
+  ["Napkin","Sleeve"],           ["Obedient","Rebellious"],     ["Raw","Cooked"],
+  ["Able","Helpless"],           ["Separate","Combine"],        ["Praiseworthy","Despicable"],
+  ["Happy","Sad"],               ["Summer","Winter"],           ["North","South"],
+  ["Rigid","Flexible"],          ["Nurture","Neglect"],         ["Wide","Narrow"],
+  ["Centre","Edge"],             ["Fix","Damage"],              ["Past","Future"],
+  ["Forte","Piano"],             ["Bounce","Stick"],            ["Type","Backspace"],
+  ["Confess","Deny"],            ["Optimistic","Pessimistic"],  ["Zip","Unzip"],
+  ["Caring","Indifferent"],      ["Miracle","Disaster"],        ["Snow","Sand"],
+  ["Party","Wake"],              ["Local","Foreign"],           ["Coarse","Silky"],
+  ["Make","Break"],              ["Pursue","Escape"],           ["Kale","Doughnut"],
+  ["Improvement","Deterioration"], ["Save","Spend"],              ["Thoughtful","Thoughtless"],
+  ["Clear","Murky"],             ["Calm","Panicked"],           ["Roar","Murmur"],
+  ["Advantage","Handicap"],      ["Slack","Taut"],              ["Beginning","Ending"],
+  ["Write","Delete"],            ["Endless","Finite"],          ["Infection","Recovery"],
+  ["Era","Moment"],              ["Laugh","Weep"],              ["Draft","Published"],
+  ["Seek","Hide"],               ["Shake","Steady"],            ["Confetti","Dust"],
+  ["Hydrated","Dehydrated"],     ["Before","After"],            ["Ocean","Desert"],
+  ["Offer","Refuse"],            ["Fine","Chunky"],             ["Tiptoe","Stomp"],
+  ["Veteran","Rookie"],          ["Help","Hinder"],             ["Zenith","Nadir"],
+  ["Crown","Dethrone"],          ["Straightened","Tangled"],    ["Defend","Attack"],
+  ["Mighty","Frail"],            ["Flustered","Composed"],      ["Boycott","Patronise"],
+  ["Near","Far"],                ["Beach","Mountain"],          ["Buyer","Seller"],
+  ["Welcome","Unwelcome"],       ["Invest","Squander"],         ["Tanned","Pale"],
+  ["Equal","Unequal"],           ["Plenty","Famine"],           ["Capable","Incapable"],
+  ["Donkey","Racehorse"],        ["Push","Pull"],               ["Good","Evil"],
+  ["Uphill","Downhill"],         ["Broad","Slim"],              ["Balloon","Anvil"],
+  ["Flow","Dam"],                ["Fill","Drain"],              ["Easy","Difficult"],
+  ["Truthful","Deceitful"],      ["Honey","Sting"],             ["Admired","Mocked"],
+  ["Upgrade","Downgrade"],       ["Soaked","Parched"],          ["Nervous","Unbothered"],
+  ["Over","Under"],              ["Head","Tail"],               ["Chorus","Verse"],
+  ["Employed","Unemployed"],     ["Throne","Beanbag"],          ["Bound","Untied"],
+  ["Go","Halt"],                 ["Client","Server"],           ["Blessed","Cursed"],
+  ["Spaghetti","Scaffolding"],   ["Paperclip","Girder"],        ["Commit","Waver"],
+  ["Disperse","Assemble"],       ["Visitor","Resident"],        ["Snail","Rocket"],
+  ["Speak","Mute"],              ["Glossy","Faded"],            ["Winning","Losing"],
+  ["Always","Rarely"],           ["Amused","Unimpressed"],      ["Blink","Stare"],
+  ["Many","Few"],                ["Undo","Redo"],               ["Rainforest","Wasteland"],
+  ["Anonymous","Named"],         ["Charge","Refund"],           ["Ajar","Sealed"],
+  ["Rescuer","Abandoner"],       ["Divide","Unite"],            ["Open","Closed"],
+  ["Shadow","Spotlight"],        ["Hello","Goodbye"],           ["Accidental","Deliberate"],
+  ["Harmony","Discord"],         ["Crayon","Chisel"],           ["Solid","Hollow"],
+  ["Motivated","Unmotivated"],   ["Determined","Wavering"],     ["Lift","Lower"],
+  ["Ripe","Unripe"],             ["Inhalation","Exhalation"],   ["Actor","Viewer"],
+  ["Previous","Next"],           ["Customer","Shopkeeper"],     ["Fluffy","Spiky"],
+  ["Free","Paid"],               ["Deciduous","Evergreen"],     ["Login","Logout"],
+  ["Murder","Rescue"],           ["Fearless","Petrified"],      ["War","Peace"],
+  ["Expected","Unexpected"],     ["Everything","Nothing"],      ["Knotted","Unravelled"],
+  ["Owner","Tenant"],            ["Hoarder","Minimalist"],      ["Relaxed","Tense"],
+  ["Buoyant","Sinking"],         ["Sandals","Wellies"],         ["Heatstroke","Hypothermia"],
+  ["Introvert","Extrovert"],     ["Elephant","Ant"],            ["Kind","Cruel"],
+  ["Ban","Permit"],              ["Uplifted","Crushed"],        ["Toned","Flabby"],
+  ["Scatter","Gather"],          ["Follow","Lead"],             ["Breakfast","Supper"],
+  ["Trust","Betray"],            ["Bold","Timid"],              ["Turtle","Hare"],
+  ["Fry","Steam"],               ["Brittle","Rubbery"],         ["Child","Adult"],
+  ["Worship","Blasphemy"],       ["Plaintiff","Defendant"],     ["Chubby","Lean"],
+  ["Teacup","Cauldron"],         ["Object","Consent"],          ["Alike","Unlike"],
+  ["Order","Beg"],               ["Large","Small"],             ["Hero","Villain"],
+  ["Bang","Hush"],               ["Above","Below"],             ["Heaven","Hell"],
+  ["Comic","Tragic"],            ["Strong","Weak"],             ["Valuable","Worthless"],
+  ["Affluent","Destitute"],      ["Flushed","Ashen"],           ["Thickset","Slender"],
+  ["Bet","Fold"],                ["Vertebrate","Invertebrate"], ["Graceful","Graceless"],
+  ["Surplus","Shortage"],        ["Gross","Net"],               ["Elect","Impeach"],
+  ["Oxidise","Reduce"],          ["Long","Brief"],              ["Preceding","Following"],
+  ["Thunder","Silence"],         ["Together","Apart"],          ["Drive","Park"],
+  ["Punctual","Tardy"],          ["Arrest","Release"],          ["Eagle","Worm"],
+  ["Speaker","Listener"],        ["Infer","Imply"],             ["Hill","Ditch"],
+  ["Acid","Alkali"],             ["Giving","Hoarding"],         ["Joined","Separated"],
+  ["Find","Lose"],               ["Ballerina","Bulldozer"],     ["Envious","Admiring"],
+  ["Load","Unload"],             ["Ask","Reply"],               ["Love","Hate"],
+  ["Plant","Uproot"],            ["Sturdy","Fragile"]
+];
+
+const ROUND_SIZE = 30;   // cards dealt per game, drawn at random from WORDS
+const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I, O, 0, 1
+const PREFIX = "dto-v1-";
+
+const $ = id => document.getElementById(id);
+
+/* A phone has no console, so surface anything that breaks on screen. */
+function crash(msg){
+  const c = document.getElementById("crash");
+  if (!c) return;
+  c.textContent = "Something broke: " + msg;
+  c.hidden = false;
+}
+window.addEventListener("error", e => crash((e.message || "unknown error") + " — line " + (e.lineno || "?")));
+window.addEventListener("unhandledrejection", e => crash("" + ((e.reason && e.reason.message) || e.reason)));
+const screens = ["s-home","s-host","s-join","s-describe","s-guess","s-hand","s-end"];
+
+function show(id){
+  screens.forEach(s => $(s).classList.toggle("on", s === id));
+  document.body.classList.toggle("inverted", id === "s-end");
+  window.scrollTo(0,0);
+}
+
+/* ---------------- game state (owned by host / solo device) --------------- */
+let mode = "solo";          // solo | host | guest
+let peer = null, conn = null, roomCode = "", hostTries = 0, hostTimer = null;
+let deck = [], idx = 0, score = 0, passed = 0, log = [];
+let mirror = null;          // guest's copy of the state
+
+function shuffle(a){
+  const c = a.slice();
+  for (let j = c.length - 1; j > 0; j--){
+    const k = Math.floor(Math.random() * (j + 1));
+    [c[j], c[k]] = [c[k], c[j]];
+  }
+  return c;
+}
+
+/* seat 0 describes cards 1, 3, 5…  seat 1 describes cards 2, 4, 6… */
+const seatFor = n => n % 2;
+
+function newRound(){
+  deck = shuffle(WORDS).slice(0, ROUND_SIZE);
+  idx = 0; score = 0; passed = 0; log = [];
+  broadcast();
+}
+
+function snapshot(seat){
+  const describing = seatFor(idx);
+  return {
+    t: "state",
+    over: idx >= deck.length,
+    pos: idx + 1,
+    total: deck.length,
+    score, passed,
+    results: log.map(e => e.result),
+    yourTurn: seat === describing,
+    seatName: "Player " + (describing + 1),
+    card: seat === describing ? deck[idx] : null,
+    log: idx >= deck.length ? log : null
+  };
+}
+
+/* on one phone the single screen always belongs to whoever is describing */
+const mySeat = () => mode === "solo" ? seatFor(idx) : 0;
+
+function broadcast(){
+  paint(snapshot(mySeat()));
+  if (mode === "host" && conn && conn.open){
+    try { conn.send(snapshot(1)); } catch(e){}
+  }
+}
+
+function applyMark(result){
+  if (idx >= deck.length) return;
+  if (result === "pass") passed++;
+  if (result === "got")  score++;
+  if (result === "trap") score--;
+  log.push({card: deck[idx], result});
+  idx++;
+
+  if (mode === "solo" && idx < deck.length){
+    pendingSolo = true;
+    $("h-who").textContent = "PLAYER " + (seatFor(idx) + 1);
+    paint(snapshot(mySeat()), true);   // update numbers without flashing the card
+    show("s-hand");
+    return;
+  }
+  broadcast();
+}
+
+/* ---------------- painting ---------------- */
+let pendingSolo = false;
+
+function fillMeter(el, results, total){
+  if (el.children.length !== total){
+    el.innerHTML = "";
+    for (let n = 0; n < total; n++) el.appendChild(document.createElement("i"));
+  }
+  results.forEach((r, n) => {
+    const bar = el.children[n];
+    if (bar) bar.style.background =
+      r === "got" ? "var(--ink)" : r === "trap" ? "var(--trap)" : "var(--quiet)";
+  });
+}
+
+function paint(st, quiet){
+  if (st.over) return renderEnd(st);
+
+  if (st.yourTurn){
+    $("d-pos").textContent   = st.pos + " / " + st.total;
+    $("d-score").textContent = st.score;
+    $("d-pass").textContent  = st.passed;
+    $("d-whose").textContent = (mode === "solo" ? st.seatName + " describes" : "Your turn to describe");
+    if (st.card){
+      $("d-answer").textContent   = st.card[0].toUpperCase();
+      $("d-instruct").textContent = "(Describe: " + st.card[1] + ")";
+    }
+    fillMeter($("d-meter"), st.results, st.total);
+    if (!quiet) show("s-describe");
+  } else {
+    $("g-pos").textContent   = st.pos + " / " + st.total;
+    $("g-score").textContent = st.score;
+    $("g-pass").textContent  = st.passed;
+    fillMeter($("g-meter"), st.results, st.total);
+    if (!quiet) show("s-guess");
+  }
+}
+
+function renderEnd(st){
+  const results = st.results;
+  const entries = st.log || log;
+  const got  = results.filter(r => r === "got").length;
+  const trap = results.filter(r => r === "trap").length;
+  const skip = results.filter(r => r === "pass").length;
+
+  $("e-final").innerHTML = st.score + "<small> / " + st.total + "</small>";
+  $("e-got").textContent  = got;
+  $("e-trap").textContent = trap;
+  $("e-skip").textContent = skip;
+
+  let v;
+  if (st.score >= 26)      v = "Almost nobody clears the deck this cleanly. Either your describing is excellent or you two can read each other’s minds.";
+  else if (st.score >= 18) v = "Strong run. The abstract cards are where most pairs start leaking points.";
+  else if (st.score >= 10) v = "Respectable. The trick is to paint a scene around the wrong word and let your partner flip it themselves.";
+  else if (st.score >= 0)  v = "The deck won this time. Fewer definitions, more pictures.";
+  else                     v = "You finished below zero, which takes a certain commitment. The trap words got you more often than the real ones.";
+  $("e-verdict").textContent = v;
+
+  const missed = (entries || []).filter(e => e.result !== "got");
+  $("e-missed").innerHTML = missed.length
+    ? "<h3>Cards that got away</h3><p>" + missed.map(e => e.card[0] + " (" + e.card[1] + ")").join(" · ") + "</p>"
+    : "<h3>Clean sweep</h3><p>Every card landed.</p>";
+
+  $("e-again").style.display = (mode === "guest") ? "none" : "";
+  show("s-end");
+}
+
+/* ---------------- networking ---------------- */
+function makeCode(){
+  let c = "";
+  for (let n = 0; n < 4; n++) c += ALPHABET[Math.floor(Math.random() * ALPHABET.length)];
+  return c;
+}
+
+function setStatus(dotId, textId, text, cls){
+  $(textId).textContent = text;
+  $(dotId).className = "dot " + (cls || "");
+}
+
+function teardown(){
+  clearTimeout(hostTimer);
+  try { if (conn) conn.close(); } catch(e){}
+  try { if (peer) peer.destroy(); } catch(e){}
+  conn = null; peer = null;
+}
+
+function hostRoom(){
+  mode = "host";
+  teardown();
+  clearTimeout(hostTimer);
+  roomCode = makeCode();
+  $("out-code").textContent = roomCode;
+  setStatus("host-dot","host-status","Opening the room…","pulse");
+  $("host-begin").disabled = true;
+  $("host-retry").hidden = true;
+  show("s-host");
+
+  if (!libraryReady()) return hostFailed("The matchmaking library didn’t load. Check your connection, then try again — or play on one phone.");
+
+  try {
+    peer = new Peer(PREFIX + roomCode, {debug: 0});
+  } catch (e) {
+    return hostFailed("Couldn’t open a room on this device. Playing on one phone always works.");
+  }
+
+  hostTimer = setTimeout(() => {
+    if (!peer || !peer.open) hostFailed("The matchmaking service isn’t answering. Try again in a moment, or play on one phone.");
+  }, 12000);
+
+  peer.on("open", () => {
+    clearTimeout(hostTimer);
+    setStatus("host-dot","host-status","Room is open. Waiting for Player 2…","pulse");
+  });
+
+  peer.on("connection", c => {
+    if (conn && conn.open){ c.close(); return; }   // room is full
+    conn = c;
+    c.on("open", () => {
+      setStatus("host-dot","host-status","Player 2 is in. You can start.","live");
+      $("host-begin").disabled = false;
+      try { c.send({t:"hello"}); } catch(e){}
+    });
+    c.on("data", msg => {
+      if (msg && msg.t === "mark") applyMark(msg.result);
+    });
+    c.on("close", dropped);
+    c.on("error", dropped);
+  });
+
+  peer.on("error", err => {
+    if (err.type === "unavailable-id" && hostTries < 5){        // code already taken, draw another
+      hostTries++;
+      setTimeout(hostRoom, 150);
+      return;
+    }
+    if (err.type === "network" || err.type === "server-error" || err.type === "socket-error")
+      return hostFailed("Lost touch with the matchmaking service. Try again, or play on one phone.");
+    hostFailed("Couldn’t open a room. Check your connection and try again.");
+  });
+}
+
+function hostFailed(msg){
+  clearTimeout(hostTimer);
+  setStatus("host-dot","host-status", msg, "bad");
+  $("out-code").textContent = "····";
+  $("host-begin").disabled = true;
+  $("host-retry").hidden = false;
+}
+
+function libraryReady(){ return typeof Peer === "function"; }
+
+function dropped(){
+  if (mode === "solo") return;
+  const live = $("s-describe").classList.contains("on") || $("s-guess").classList.contains("on");
+  if (live){
+    alert("The other player dropped out. Back to the start.");
+    goHome();
+  } else if (mode === "host"){
+    setStatus("host-dot","host-status","Player 2 left. Waiting again…","pulse");
+    $("host-begin").disabled = true;
+  }
+}
+
+function joinRoom(){
+  const code = ($("in-code").value || "").toUpperCase().replace(/[^A-Z0-9]/g,"");
+  if (code.length !== 4){
+    setStatus("join-dot","join-status","That code needs to be 4 characters.","bad");
+    return;
+  }
+  mode = "guest";
+  teardown();
+  setStatus("join-dot","join-status","Looking for the room…","pulse");
+
+  if (!libraryReady()){
+    setStatus("join-dot","join-status","The matchmaking library didn’t load. Check your connection, then try again.","bad");
+    return;
+  }
+
+  try {
+    peer = new Peer({debug: 0});
+  } catch (e) {
+    setStatus("join-dot","join-status","Couldn’t connect from this device. Try one phone instead.","bad");
+    return;
+  }
+  let settled = false;
+
+  const giveUp = setTimeout(() => {
+    if (settled) return;
+    setStatus("join-dot","join-status","No answer. Check the code, or ask them to reopen the room.","bad");
+    teardown();
+  }, 15000);
+
+  peer.on("open", () => {
+    conn = peer.connect(PREFIX + code, {reliable: true});
+    conn.on("open", () => {
+      settled = true;
+      clearTimeout(giveUp);
+      setStatus("join-dot","join-status","You’re in. Waiting for Player 1 to deal…","live");
+    });
+    conn.on("data", msg => {
+      if (!msg) return;
+      if (msg.t === "state"){ mirror = msg; paint(msg); }
+    });
+    conn.on("close", dropped);
+    conn.on("error", dropped);
+  });
+
+  peer.on("error", err => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(giveUp);
+    const m = err.type === "peer-unavailable"
+      ? "No room with that code. Check it and try again."
+      : "Couldn’t connect. Check your connection and try again.";
+    setStatus("join-dot","join-status", m, "bad");
+  });
+}
+
+/* ---------------- input ---------------- */
+function mark(result){
+  if (mode === "guest"){
+    if (conn && conn.open) conn.send({t:"mark", result});
+  } else {
+    applyMark(result);
+  }
+}
+
+function goHome(){
+  teardown();
+  mode = "solo";
+  $("in-code").value = "";
+  setStatus("join-dot","join-status","Waiting for a code","");
+  show("s-home");
+}
+
+/* One listener for every button, matched by data-act. Nothing to wire up,
+   so a single missing element can no longer stop the rest from working. */
+const ACTIONS = {
+  host:    () => { hostTries = 0; hostRoom(); },
+  retry:   () => { hostTries = 0; hostRoom(); },
+  join:    () => { show("s-join"); const f = $("in-code"); if (f) f.focus(); },
+  joingo:  joinRoom,
+  solo:    () => { mode = "solo"; teardown(); newRound(); },
+  deal:    newRound,
+  again:   newRound,
+  ready:   () => { pendingSolo = false; broadcast(); },
+  got:     () => mark("got"),
+  trap:    () => mark("trap"),
+  pass:    () => mark("pass"),
+  home:    goHome
+};
+
+document.addEventListener("click", e => {
+  const el = e.target.closest ? e.target.closest("[data-act]") : null;
+  if (!el) return;
+  const fn = ACTIONS[el.dataset.act];
+  if (!fn) return;
+  e.preventDefault();
+  try { fn(); } catch (err) { crash((err && err.message) || err); }
+});
+
+$("in-code").addEventListener("input", e => {
+  e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,"");
+});
+$("in-code").addEventListener("keydown", e => { if (e.key === "Enter") joinRoom(); });
+
+document.addEventListener("keydown", e => {
+  if (!$("s-describe").classList.contains("on")) return;
+  const k = e.key.toLowerCase();
+  if (k === "g"){ e.preventDefault(); mark("got");  }
+  if (k === "t"){ e.preventDefault(); mark("trap"); }
+  if (k === "p"){ e.preventDefault(); mark("pass"); }
+});
+
+/* opened by double-clicking the file: rooms can't work, one phone still can */
+if (location.protocol === "file:"){
+  const w = $("file-warn");
+  w.innerHTML = "<b>Opened from a file.</b> Two-phone rooms need a real web address — put this on GitHub Pages first. " +
+                "<b>Share one phone</b> works right now.";
+  w.hidden = false;
+}
+
+const boot = $("boot");
+if (boot) boot.textContent = "v6 · ready" + (libraryReady() ? "" : " · matchmaking library blocked, one phone only");
+
+window.addEventListener("beforeunload", teardown);
+</script>
+</body>
+</html>
